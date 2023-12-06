@@ -1,5 +1,7 @@
 import serial
 import time
+from typing import Tuple
+import logging
 
 STX = b"\x02"
 ETX = b"\x03"
@@ -21,10 +23,10 @@ class BarbieCamera:
     def _send_command(
         self, cmd: bytes, data: bytes, response_length: int, read_etx: bool = True
     ) -> bytes:
-        print(f"Sending {cmd=} {data=}")
+        logging.debug(f"Sending {cmd=} {data=}")
         self.ser.write(STX + cmd + data + ETX)
         ack = self.ser.read(1)
-        print(f"{ack=}")
+        logging.debug(f"{ack=}")
         assert ack == ACK, "Command not acked"
         stx = self.ser.read(1)
         assert stx == STX
@@ -43,35 +45,48 @@ class BarbieCamera:
     def get_image_index(self) -> int:
         return self._send_command(b"I", b"\0", 2)[1]
 
-    def upload_image(self) -> bytes:
+    def upload_image(self) -> Tuple[bytes, int, int, int]:
         _, n_cols, n_black_lines, n_visible_lines, n_status_bytes = self._send_command(
             b"U", b"\0", 5, read_etx=False
         )
-        print(n_cols, n_black_lines, n_visible_lines, n_status_bytes)
         n_total = n_cols * (n_black_lines + n_visible_lines) + n_status_bytes
         img = self.ser.read(n_total)
         assert self.ser.read(1) == ETX
-        return img
+        return img, n_cols, n_black_lines, n_visible_lines
 
     def grab_image(self):
-        print(self._send_command(b"G", b"\0", 2))
+        self._send_command(b"G", b"\0", 2)
 
     def grab_result(self):
         return self._send_command(b"Y", b"\0", 2)
 
 
 if __name__ == "__main__":
-    cam = BarbieCamera(port="/dev/tty.usbserial-A9BI3S58")
-    print(cam.reset_image_count(0))
+    import argparse
+    from decode_image import decode_image
+    import cv2
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("port")
+    parser.add_argument("output_file")
+    parser.add_argument("binary_file", default=None)
+    args = parser.parse_args()
+
+    cam = BarbieCamera(port=args.port)
+    print("Taking picture")
+    cam.reset_image_count(0)
     print(cam.grab_image())
     res = cam.grab_result()
-    print(f"{res=}")
+    print("Waiting for camera to finish taking picture")
     while res[:1] == b"!":
         time.sleep(0.1)
         res = cam.grab_result()
-        print(f"{res=}")
-    print(cam.reset_image_count(0))
-    img = cam.upload_image()
-    print(f"{cam.get_image_index()=}")
-    with open("test.bin", "wb") as f:
-        f.write(img)
+    print("Downloading picture from camera")
+    cam.reset_image_count(0)
+    img, n_cols, n_black_lines, n_visible_lines = cam.upload_image()
+    if args.binary_file is not None:
+        with open(args.binary_file, "wb") as f:
+            f.write(img)
+
+    output_image = decode_image(img, n_cols=164, n_black_lines=2, n_visible_lines=124)
+    cv2.imwrite(args.output_file, output_image)
