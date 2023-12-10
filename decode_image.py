@@ -11,10 +11,16 @@ def decode_image(data: bytes, n_cols: int, n_black_lines: int, n_visible_lines: 
     )
 
     bayer_img = np.zeros((n_visible_lines, n_cols), dtype="u1")
-    bayer_img[::2, ::2] = input_img[1::4, :]
-    bayer_img[::2, 1::2] = input_img[::4, :]
-    bayer_img[1::2, ::2] = input_img[3::4, :]
-    bayer_img[1::2, 1::2] = input_img[2::4, :]
+
+    bayer_img[::2, 3:-2:2] = input_img[::4, :-2]  # red
+    bayer_img[::2, 2:-2:2] = input_img[1::4, 2:]  # green 1
+    bayer_img[1::2, 3:-2:2] = input_img[2::4, :-2]  # green 2
+    bayer_img[1::2, 2:-2:2] = input_img[3::4, 2:]  # blue
+
+    bayer_img = bayer_img[n_black_lines:, 2:-2]
+
+    with open("out2.bmp", "wb") as f:
+        input_img.tofile(f)
 
     output_img = cv2.cvtColor(bayer_img, cv2.COLOR_BAYER_GRBG2BGR)
     return output_img
